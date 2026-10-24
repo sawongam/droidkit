@@ -5,24 +5,9 @@ import 'package:path/path.dart' as p;
 /// File name searched upward from the working directory.
 const toolchainLockFileName = 'droidkit.toml';
 
-/// Project-level pin of the Android toolchain, analogous to `mise.toml`.
+/// Project pin of the Android toolchain (`droidkit.toml`), like `mise.toml`.
 ///
-/// ```toml
-/// [tools]
-/// jdk = "21"                 # major, or an exact Temurin version e.g. "21.0.13+9"
-/// cmdline-tools = "22.0"
-/// platform = "36"
-/// build-tools = "37.0.0"
-/// ndk = "27.0.12077973"      # optional
-///
-/// [emulator]
-/// image = "google_apis_playstore"
-/// device = "pixel_9"
-/// name = "flutter_emu"
-/// ```
-///
-/// Set `emulator = false` at the root to skip the emulator. Explicit CLI flags
-/// override values from this file.
+/// Explicit CLI flags override these values. See the README for the schema.
 class ToolchainLock {
   /// Creates a [ToolchainLock].
   const ToolchainLock({
@@ -41,7 +26,7 @@ class ToolchainLock {
   /// Absolute path of the file that was loaded, if any.
   final String? path;
 
-  /// Temurin major (`21`) or exact Adoptium semver (`21.0.13+9`).
+  /// Temurin major (`21`) or exact Adoptium version (`21.0.13+9`).
   final String? jdk;
 
   /// `cmdline-tools` catalog version, e.g. `22.0` or `latest`.
@@ -53,7 +38,7 @@ class ToolchainLock {
   /// Build-tools revision, e.g. `37.0.0`.
   final String? buildTools;
 
-  /// NDK revision to install, e.g. `27.0.12077973`.
+  /// NDK revision to install.
   final String? ndk;
 
   /// When `false`, setup skips the emulator. `null` leaves the CLI default.
@@ -71,8 +56,7 @@ class ToolchainLock {
   /// JDK major when [jdk] is a bare integer; otherwise `null`.
   int? get jdkMajor {
     final value = jdk;
-    if (value == null) return null;
-    return int.tryParse(value);
+    return value == null ? null : int.tryParse(value);
   }
 
   /// Exact Temurin version when [jdk] is not a bare major; otherwise `null`.
@@ -118,44 +102,28 @@ class ToolchainLock {
     final tools = tables['tools'] ?? const {};
     final emu = tables['emulator'] ?? const {};
     final root = tables[''] ?? const {};
-
-    int? platform;
-    final platformRaw = tools['platform'];
-    if (platformRaw is int) {
-      platform = platformRaw;
-    } else if (platformRaw is String) {
-      platform = int.tryParse(platformRaw);
-      if (platform == null) {
-        throw DroidkitException(
-          'Invalid tools.platform in ${path ?? 'droidkit.toml'}: '
-          'expected an API level, got "$platformRaw".',
-        );
-      }
-    }
-
-    final jdkRaw = tools['jdk'];
-    final String? jdk;
-    if (jdkRaw == null) {
-      jdk = null;
-    } else if (jdkRaw is int || jdkRaw is String) {
-      jdk = '$jdkRaw';
-    } else {
-      throw DroidkitException(
-        'Invalid tools.jdk in ${path ?? 'droidkit.toml'}.',
-      );
-    }
+    final file = path ?? toolchainLockFileName;
 
     return ToolchainLock(
       path: path,
-      jdk: jdk,
+      jdk: _string(tools['jdk']),
       cmdlineTools: _string(tools['cmdline-tools']),
-      platform: platform,
+      platform: _apiLevel(tools['platform'], file),
       buildTools: _string(tools['build-tools']),
       ndk: _string(tools['ndk']),
       emulator: root['emulator'] is bool ? root['emulator'] as bool : null,
       image: _string(emu['image']),
       device: _string(emu['device']),
       avdName: _string(emu['name']),
+    );
+  }
+
+  static int? _apiLevel(Object? value, String file) {
+    if (value == null) return null;
+    final parsed = value is int ? value : int.tryParse('$value');
+    if (parsed != null) return parsed;
+    throw DroidkitException(
+      'Invalid tools.platform in $file: expected an API level, got "$value".',
     );
   }
 

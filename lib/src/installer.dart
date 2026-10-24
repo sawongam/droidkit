@@ -172,15 +172,12 @@ class Installer {
   /// Asks Adoptium for the newest Temurin JDK [major] for this host.
   Future<AdoptiumRelease> findJdkRelease(int major) async {
     _ensureAdoptiumHost();
-    final url = Uri.https(
-      'api.adoptium.net',
-      '/v3/assets/latest/$major/hotspot',
-      {
-        'os': _adoptiumOs,
-        'architecture': ctx.host.arch.adoptiumName,
-        'image_type': 'jdk',
-      },
-    );
+    final url =
+        Uri.https('api.adoptium.net', '/v3/assets/latest/$major/hotspot', {
+          'os': _adoptiumOs,
+          'architecture': ctx.host.arch.adoptiumName,
+          'image_type': 'jdk',
+        });
     final release = AdoptiumRelease.fromJson(
       await ctx.downloader.getString(url),
     );
@@ -263,17 +260,22 @@ class Installer {
 
   /// Returns a usable JDK, offering to install one if none is found.
   ///
-  /// [exactVersion] pins an Adoptium build (e.g. `21.0.13+9`). [major] pins a
-  /// feature release when set; when both are omitted any supported JDK is
-  /// reused, otherwise Temurin [defaultJavaVersion] is downloaded.
+  /// [exactVersion] pins an Adoptium build under `~/.droidkit/jdk`. [major]
+  /// pins a feature release when set; when both are omitted any supported JDK
+  /// is reused, otherwise Temurin [defaultJavaVersion] is downloaded.
   Future<Jdk> ensureJdk({int? major, String? exactVersion}) async {
     if (exactVersion != null) {
-      final all = await ctx.jdkLocator.findAll(configured: ctx.config.jdkHome);
-      for (final jdk in all) {
-        if (jdk.isSupported && _jdkMatchesVersion(jdk, exactVersion)) {
-          ctx.jdkOverride = jdk;
-          return jdk;
-        }
+      final dest = p.join(
+        ctx.paths.jdkDir,
+        'temurin-${exactVersion.replaceAll('+', '_')}',
+      );
+      final existing = await ctx.jdkLocator.inspect(
+        ctx.jdkLocator.javaHomeIn(dest),
+        'droidkit',
+      );
+      if (existing != null && existing.isSupported) {
+        ctx.jdkOverride = existing;
+        return existing;
       }
       return installJdkVersion(exactVersion);
     }
@@ -311,13 +313,6 @@ class Installer {
       );
     }
     return installJdk(installMajor);
-  }
-
-  static bool _jdkMatchesVersion(Jdk jdk, String wanted) {
-    final normalized = wanted.replaceAll('_', '+');
-    return jdk.versionString == normalized ||
-        jdk.versionString.contains(normalized) ||
-        jdk.home.contains('temurin-${wanted.replaceAll('+', '_')}');
   }
 
   // ---- cmdline-tools --------------------------------------------------------
