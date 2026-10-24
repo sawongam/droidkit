@@ -46,6 +46,7 @@ in one command, and it's written in Dart, so anyone with Flutter can run it.
 - **JDK management**: Eclipse Temurin into `~/.droidkit/jdk`, system Java untouched.
 - **Shell integration**: bash, zsh, fish, PowerShell and cmd.
 - **CI-friendly**: non-interactive mode, exit codes, plain logs.
+- **Project lockfile**: pin JDK / SDK / emulator versions in `droidkit.toml`.
 
 ## Install
 
@@ -114,6 +115,23 @@ droidkit stop --all
 | WSL 2 | ✅ | ❌ use the Windows side |
 
 ## Configuration
+
+### `droidkit.toml`
+
+Optional. Pin versions for `setup` (walks up from the working directory; CLI
+flags win):
+
+```toml
+[tools]
+jdk = "21"
+cmdline-tools = "22.0"
+platform = "36"
+build-tools = "37.0.0"
+
+[emulator]
+image = "google_apis_playstore"
+name = "flutter_emu"
+```
 
 | Variable | Effect |
 | --- | --- |

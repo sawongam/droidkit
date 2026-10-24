@@ -152,39 +152,65 @@ class Installer {
 
   // ---- JDK ----------------------------------------------------------------
 
-  /// Asks Adoptium for the newest Temurin JDK [major] for this host.
-  Future<AdoptiumRelease> findJdkRelease(int major) async {
+  String get _adoptiumOs {
     final host = ctx.host;
-    if (host.arch == HostArch.other) {
-      throw DroidkitException(
-        'No Temurin JDK is published for ${host.description}.',
-        hint:
-            'Install a JDK $minJavaVersion–$maxJavaVersion yourself and set '
-            'JAVA_HOME.',
-      );
-    }
-    final os = host.isLinux && File('/etc/alpine-release').existsSync()
+    return host.isLinux && File('/etc/alpine-release').existsSync()
         ? 'alpine-linux'
         : host.os.adoptiumName;
-    final url = Uri.https(
-      'api.adoptium.net',
-      '/v3/assets/latest/$major/hotspot',
-      {'os': os, 'architecture': host.arch.adoptiumName, 'image_type': 'jdk'},
+  }
+
+  void _ensureAdoptiumHost() {
+    if (ctx.host.arch != HostArch.other) return;
+    throw DroidkitException(
+      'No Temurin JDK is published for ${ctx.host.description}.',
+      hint:
+          'Install a JDK $minJavaVersion–$maxJavaVersion yourself and set '
+          'JAVA_HOME.',
     );
+  }
+
+  /// Asks Adoptium for the newest Temurin JDK [major] for this host.
+  Future<AdoptiumRelease> findJdkRelease(int major) async {
+    _ensureAdoptiumHost();
+    final url =
+        Uri.https('api.adoptium.net', '/v3/assets/latest/$major/hotspot', {
+          'os': _adoptiumOs,
+          'architecture': ctx.host.arch.adoptiumName,
+          'image_type': 'jdk',
+        });
     final release = AdoptiumRelease.fromJson(
       await ctx.downloader.getString(url),
     );
     if (release == null) {
       throw DroidkitException(
-        'Adoptium has no JDK $major build for ${host.description}.',
+        'Adoptium has no JDK $major build for ${ctx.host.description}.',
       );
     }
     return release;
   }
 
-  /// Downloads and installs Temurin [major] into droidkit's JDK folder.
-  Future<Jdk> installJdk(int major) async {
-    final release = await findJdkRelease(major);
+  /// Asks Adoptium for an exact Temurin [version] (e.g. `21.0.13+9`).
+  Future<AdoptiumRelease> findJdkVersion(String version) async {
+    _ensureAdoptiumHost();
+    final url = Uri.https('api.adoptium.net', '/v3/assets/version/$version', {
+      'os': _adoptiumOs,
+      'architecture': ctx.host.arch.adoptiumName,
+      'image_type': 'jdk',
+      'jvm_impl': 'hotspot',
+    });
+    final release = AdoptiumRelease.fromJson(
+      await ctx.downloader.getString(url),
+    );
+    if (release == null) {
+      throw DroidkitException(
+        'Adoptium has no JDK $version build for ${ctx.host.description}.',
+      );
+    }
+    return release;
+  }
+
+  /// Downloads and installs a Temurin release into droidkit's JDK folder.
+  Future<Jdk> _installTemurin(AdoptiumRelease release) async {
     final dest = p.join(
       ctx.paths.jdkDir,
       'temurin-${release.version.replaceAll('+', '_')}',
@@ -224,21 +250,57 @@ class Installer {
     return jdk;
   }
 
+  /// Downloads and installs Temurin [major] into droidkit's JDK folder.
+  Future<Jdk> installJdk(int major) async =>
+      _installTemurin(await findJdkRelease(major));
+
+  /// Downloads and installs an exact Temurin [version].
+  Future<Jdk> installJdkVersion(String version) async =>
+      _installTemurin(await findJdkVersion(version));
+
   /// Returns a usable JDK, offering to install one if none is found.
-  Future<Jdk> ensureJdk({int major = defaultJavaVersion}) async {
+  ///
+  /// [exactVersion] pins an Adoptium build under `~/.droidkit/jdk`. [major]
+  /// pins a feature release when set; when both are omitted any supported JDK
+  /// is reused, otherwise Temurin [defaultJavaVersion] is downloaded.
+  Future<Jdk> ensureJdk({int? major, String? exactVersion}) async {
+    if (exactVersion != null) {
+      final dest = p.join(
+        ctx.paths.jdkDir,
+        'temurin-${exactVersion.replaceAll('+', '_')}',
+      );
+      final existing = await ctx.jdkLocator.inspect(
+        ctx.jdkLocator.javaHomeIn(dest),
+        'droidkit',
+      );
+      if (existing != null && existing.isSupported) {
+        ctx.jdkOverride = existing;
+        return existing;
+      }
+      return installJdkVersion(exactVersion);
+    }
+
     final found = await ctx.jdk();
-    if (found != null) return found;
+    if (found != null && (major == null || found.majorVersion == major)) {
+      return found;
+    }
 
     final all = await ctx.jdkLocator.findAll(configured: ctx.config.jdkHome);
     for (final jdk in all) {
+      if (jdk.isSupported && (major == null || jdk.majorVersion == major)) {
+        ctx.jdkOverride = jdk;
+        return jdk;
+      }
       _log.warn('Ignoring Java at ${jdk.home}: it ${jdk.problem}.');
     }
+
+    final installMajor = major ?? defaultJavaVersion;
     _log.info(
       'Android\'s command-line tools need a JDK '
       '$minJavaVersion–$maxJavaVersion.',
     );
     final install = ctx.confirm(
-      'Download Eclipse Temurin JDK $major into ${ctx.paths.jdkDir}? '
+      'Download Eclipse Temurin JDK $installMajor into ${ctx.paths.jdkDir}? '
       '(your system Java is not touched)',
     );
     if (!install) {
@@ -250,7 +312,7 @@ class Installer {
         exitCode: ExitCode.unavailable,
       );
     }
-    return installJdk(major);
+    return installJdk(installMajor);
   }
 
   // ---- cmdline-tools --------------------------------------------------------
