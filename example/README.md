@@ -9,6 +9,24 @@ droidkit start          # boot your emulator
 flutter run
 ```
 
+## Lock versions in the project (`droidkit.toml`)
+
+```toml
+[tools]
+jdk = "21"
+cmdline-tools = "22.0"
+platform = "36"
+build-tools = "37.0.0"
+
+[emulator]
+image = "google_apis_playstore"
+name = "flutter_emu"
+```
+
+```sh
+droidkit --yes setup    # reads droidkit.toml from this directory or a parent
+```
+
 ## Reuse an SDK you already have
 
 `droidkit setup` detects `ANDROID_HOME`, `flutter config --android-sdk` and the
