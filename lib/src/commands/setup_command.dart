@@ -1,9 +1,12 @@
 import 'dart:io';
 
+import 'package:args/args.dart';
 import 'package:droidkit/src/avd/avd_service.dart';
+import 'package:droidkit/src/catalog/models.dart';
 import 'package:droidkit/src/catalog/resolver.dart';
 import 'package:droidkit/src/commands/droidkit_command.dart';
 import 'package:droidkit/src/commands/env_command.dart';
+import 'package:droidkit/src/config/toolchain_lock.dart';
 import 'package:droidkit/src/context.dart';
 import 'package:droidkit/src/env/shell_profile.dart';
 import 'package:droidkit/src/installer.dart';
@@ -89,7 +92,11 @@ class SetupCommand extends DroidkitCommand {
     final ctx = await context();
     final installer = Installer(ctx)..cleanTemp();
     final host = ctx.host;
-    final apiArg = argResults!['api'] as String?;
+    final lock = ctx.lock;
+    final initLock = lock == null;
+    final args = argResults!;
+
+    final apiArg = args.option('api');
     final api = apiArg == null ? null : int.tryParse(apiArg);
     if (apiArg != null && api == null) {
       usageException('--api must be a number.');
@@ -99,8 +106,11 @@ class SetupCommand extends DroidkitCommand {
       '${styleBold.wrap('droidkit setup')} — Android toolchain for Flutter '
       '(${host.description})\n',
     );
+    if (lock != null && !lock.isEmpty) {
+      logger.info('Using ${lock.path}');
+    }
 
-    var wantEmulator = argResults!['emulator'] as bool;
+    var wantEmulator = args.preferFlag('emulator', lock?.emulator);
     if (wantEmulator && !host.supportsEmulator) {
       logger.warn('${host.emulatorUnsupportedReason} Continuing without it.');
       wantEmulator = false;
@@ -124,9 +134,19 @@ class SetupCommand extends DroidkitCommand {
 
     // 3. cmdline-tools + licenses -------------------------------------------
     _step('Android SDK');
+    final cmdlineTools = args.preferOption(
+      'cmdline-tools',
+      lock?.cmdlineTools,
+    )!;
+    final replaceTools =
+        (args.wasParsed('cmdline-tools') || lock?.cmdlineTools != null) &&
+        sdk.hasCmdlineTools &&
+        sdk.cmdlineToolsVersion != cmdlineTools &&
+        cmdlineTools != 'latest';
     await installer.ensureCmdlineTools(
       sdk,
-      version: argResults!['cmdline-tools'] as String,
+      version: cmdlineTools,
+      replace: replaceTools,
     );
     logger.success(
       'Command-line tools ${sdk.cmdlineToolsVersion ?? ''} ready'.replaceAll(
@@ -138,7 +158,8 @@ class SetupCommand extends DroidkitCommand {
     await installer.acceptLicenses(tools);
 
     // 4. Packages -----------------------------------------------------------
-    final targetApi = api ?? await installer.flutterCompileSdk();
+    final targetApi =
+        api ?? lock?.platform ?? await installer.flutterCompileSdk();
     final catalog = await ctx.catalogs.main();
     final resolver = PackageResolver(catalog, host);
     final platform = resolver.platformPath(targetApi);
@@ -150,20 +171,23 @@ class SetupCommand extends DroidkitCommand {
         exitCode: ExitCode.usage,
       );
     }
-    final buildTools = resolver.latestBuildTools()?.path;
+    final buildTools = _buildToolsPath(lock, catalog, resolver);
     final packages = [
       if (host.supportsPlatformTools) 'platform-tools',
       platform,
       ?buildTools,
     ];
-    if (argResults!['ndk'] as bool) {
-      final ndk = await ctx.flutter.defaultNdkVersion(
-        (path) => File(path).readAsStringSync(),
-      );
-      if (ndk == null) {
+    String? ndkVersion;
+    if (args.wasParsed('ndk') ? args['ndk'] as bool : lock?.ndk != null) {
+      ndkVersion =
+          lock?.ndk ??
+          await ctx.flutter.defaultNdkVersion(
+            (path) => File(path).readAsStringSync(),
+          );
+      if (ndkVersion == null) {
         logger.warn('Could not read Flutter\'s NDK version; skipping the NDK.');
       } else {
-        packages.add('ndk;$ndk');
+        packages.add('ndk;$ndkVersion');
       }
     }
     await installer.installPackages(tools, packages);
@@ -176,36 +200,42 @@ class SetupCommand extends DroidkitCommand {
 
     // 5. Emulator -----------------------------------------------------------
     String? avdName;
+    String? imageTag = args.preferOption('image', lock?.image);
+    final deviceId = args.preferOption('device', lock?.device);
+    final wantedAvd = args.preferOption('avd-name', lock?.avdName);
     if (wantEmulator) {
       _step('Emulator');
       final existing = await tools.listAvds();
+      final pinned = wantedAvd == null ? null : sanitizeAvdName(wantedAvd);
+      final reuse = pinned != null && existing.contains(pinned);
       final create =
-          existing.isEmpty ||
-          argResults!['avd-name'] != null ||
-          argResults!['image'] != null ||
-          ctx.confirm(
-            'You already have ${existing.join(', ')}. Create another emulator?',
-            defaultValue: false,
-          );
+          !reuse &&
+          (existing.isEmpty ||
+              args.wasParsed('avd-name') ||
+              args.wasParsed('image') ||
+              pinned != null ||
+              ctx.confirm(
+                'You already have ${existing.join(', ')}. Create another '
+                'emulator?',
+                defaultValue: false,
+              ));
       if (create) {
-        final tag =
-            (argResults!['image'] as String?) ??
-            ctx.choose(
-              'Which kind of emulator?',
-              choices: systemImageTags.keys.toList(),
-              defaultValue: 'google_apis_playstore',
-              display: (t) => '$t — ${systemImageTags[t]}',
-            );
+        imageTag ??= ctx.choose(
+          'Which kind of emulator?',
+          choices: systemImageTags.keys.toList(),
+          defaultValue: 'google_apis_playstore',
+          display: (t) => '$t — ${systemImageTags[t]}',
+        );
         avdName = await AvdService(ctx).create(
           sdk: sdk,
           api: targetApi,
-          tag: tag,
-          device: argResults!['device'] as String?,
-          name: argResults!['avd-name'] as String?,
+          tag: imageTag,
+          device: deviceId,
+          name: wantedAvd,
         );
       } else {
         await installer.installPackages(tools, ['emulator']);
-        avdName = ctx.config.defaultAvd ?? existing.first;
+        avdName = reuse ? pinned : (ctx.config.defaultAvd ?? existing.first);
       }
       if (host.isLinux && !File('/dev/kvm').existsSync()) {
         logger.warn(
@@ -234,6 +264,23 @@ class SetupCommand extends DroidkitCommand {
     }
     await _persistEnv(ctx);
 
+    if (initLock) {
+      final pinNoEmulator =
+          args.wasParsed('emulator') && !(args['emulator'] as bool);
+      final written = ToolchainLock(
+        jdk: '${jdk.majorVersion}',
+        cmdlineTools: sdk.cmdlineToolsVersion ?? cmdlineTools,
+        platform: targetApi,
+        buildTools: buildTools?.replaceFirst('build-tools;', ''),
+        ndk: ndkVersion,
+        emulator: pinNoEmulator ? false : null,
+        image: wantEmulator ? imageTag : null,
+        device: wantEmulator ? deviceId : null,
+        avdName: wantEmulator ? avdName : null,
+      ).save(ctx.fs);
+      logger.info('Wrote $written');
+    }
+
     // Done ------------------------------------------------------------------
     logger
       ..info('')
@@ -248,6 +295,24 @@ class SetupCommand extends DroidkitCommand {
 
   void _step(String title) =>
       logger.info('\n${styleBold.wrap(cyan.wrap('▸ $title'))}');
+
+  String? _buildToolsPath(
+    ToolchainLock? lock,
+    SdkCatalog catalog,
+    PackageResolver resolver,
+  ) {
+    final pinned = lock?.buildTools;
+    if (pinned == null) return resolver.latestBuildTools()?.path;
+    final path = 'build-tools;$pinned';
+    if (catalog.find(path) == null) {
+      throw DroidkitException(
+        '$path is not in Google\'s SDK catalog.',
+        hint: 'Check tools.build-tools in ${lock?.path ?? 'droidkit.toml'}.',
+        exitCode: ExitCode.usage,
+      );
+    }
+    return path;
+  }
 
   Future<AndroidSdk> _chooseSdk(DroidkitContext ctx) async {
     _step('SDK location');
@@ -304,7 +369,11 @@ class SetupCommand extends DroidkitCommand {
       : path;
 
   Future<Jdk> _chooseJdk(DroidkitContext ctx, Installer installer) async {
-    final mode = argResults!['jdk'] as String;
+    final args = argResults!;
+    if (!args.wasParsed('jdk')) {
+      return installer.ensureJdk(major: ctx.lock?.jdkMajor);
+    }
+    final mode = args['jdk'] as String;
     switch (mode) {
       case 'auto':
         return installer.ensureJdk();
@@ -361,5 +430,17 @@ class SetupCommand extends DroidkitCommand {
         '${darkGray.wrap(env.render(shell))}',
       );
     }
+  }
+}
+
+extension on ArgResults {
+  bool preferFlag(String name, bool? locked) {
+    if (wasParsed(name)) return this[name] as bool;
+    return locked ?? this[name] as bool;
+  }
+
+  String? preferOption(String name, String? locked) {
+    if (wasParsed(name)) return this[name] as String?;
+    return locked ?? this[name] as String?;
   }
 }

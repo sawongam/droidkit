@@ -225,20 +225,39 @@ class Installer {
   }
 
   /// Returns a usable JDK, offering to install one if none is found.
-  Future<Jdk> ensureJdk({int major = defaultJavaVersion}) async {
+  ///
+  /// When [major] is set, only that feature release is accepted. Otherwise any
+  /// supported JDK is reused, or Temurin [defaultJavaVersion] is downloaded.
+  Future<Jdk> ensureJdk({int? major}) async {
     final found = await ctx.jdk();
-    if (found != null) return found;
+    if (found != null && (major == null || found.majorVersion == major)) {
+      return found;
+    }
 
     final all = await ctx.jdkLocator.findAll(configured: ctx.config.jdkHome);
     for (final jdk in all) {
-      _log.warn('Ignoring Java at ${jdk.home}: it ${jdk.problem}.');
+      if (!jdk.isSupported) {
+        _log.warn('Ignoring Java at ${jdk.home}: it ${jdk.problem}.');
+        continue;
+      }
+      if (major != null && jdk.majorVersion != major) {
+        _log.warn(
+          'Ignoring Java at ${jdk.home}: is Java ${jdk.majorVersion}, '
+          'need $major.',
+        );
+        continue;
+      }
+      ctx.jdkOverride = jdk;
+      return jdk;
     }
+
+    final installMajor = major ?? defaultJavaVersion;
     _log.info(
       'Android\'s command-line tools need a JDK '
       '$minJavaVersion–$maxJavaVersion.',
     );
     final install = ctx.confirm(
-      'Download Eclipse Temurin JDK $major into ${ctx.paths.jdkDir}? '
+      'Download Eclipse Temurin JDK $installMajor into ${ctx.paths.jdkDir}? '
       '(your system Java is not touched)',
     );
     if (!install) {
@@ -250,7 +269,7 @@ class Installer {
         exitCode: ExitCode.unavailable,
       );
     }
-    return installJdk(major);
+    return installJdk(installMajor);
   }
 
   // ---- cmdline-tools --------------------------------------------------------

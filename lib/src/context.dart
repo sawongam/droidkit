@@ -2,6 +2,7 @@ import 'dart:io' as io;
 
 import 'package:droidkit/src/catalog/catalog_repository.dart';
 import 'package:droidkit/src/config/droidkit_config.dart';
+import 'package:droidkit/src/config/toolchain_lock.dart';
 import 'package:droidkit/src/host/host_platform.dart';
 import 'package:droidkit/src/java/jdk.dart';
 import 'package:droidkit/src/net/downloader.dart';
@@ -88,6 +89,9 @@ class DroidkitContext {
 
   /// Persistent settings.
   late final DroidkitConfig config = DroidkitConfig.load(fs, paths);
+
+  /// Project `droidkit.toml`, if found above the working directory.
+  late final ToolchainLock? lock = ToolchainLock.find(fs);
 
   /// Saves [config].
   void saveConfig() => config.save(fs, paths);

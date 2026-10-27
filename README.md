@@ -115,6 +115,23 @@ droidkit stop --all
 
 ## Configuration
 
+### `droidkit.toml`
+
+Like `mise.toml`: if missing, `setup` writes one after installing; if present,
+`setup` follows it and does not overwrite. CLI flags still win.
+
+```toml
+[tools]
+jdk = "21"
+cmdline-tools = "22.0"
+platform = 36
+build-tools = "37.0.0"
+
+[emulator]
+image = "google_apis_playstore"
+name = "flutter_emu"
+```
+
 | Variable | Effect |
 | --- | --- |
 | `DROIDKIT_HOME` | droidkit's own files (default `~/.droidkit`). |
