@@ -191,16 +191,21 @@ class AvdService {
     await installer.installPackages(tools, needed);
 
     final devices = await tools.listDevices();
-    if (device != null &&
-        devices.isNotEmpty &&
-        !devices.any((d) => d.id == device)) {
+    // Accept any casing (`Pixel_Tablet` → `pixel_tablet`).
+    final matched = device == null
+        ? null
+        : (devices.where((d) => d.id == device).firstOrNull ??
+              devices
+                  .where((d) => d.id.toLowerCase() == device.toLowerCase())
+                  .firstOrNull);
+    if (device != null && devices.isNotEmpty && matched == null) {
       throw DroidkitException(
         'Unknown device profile "$device".',
         hint: 'Run `droidkit avd devices` to list profiles.',
         exitCode: ExitCode.usage,
       );
     }
-    final deviceId = device ?? defaultDevice(devices);
+    final deviceId = matched?.id ?? device ?? defaultDevice(devices);
     final deviceName = devices.where((d) => d.id == deviceId).firstOrNull?.name;
 
     final existing = await tools.listAvds();

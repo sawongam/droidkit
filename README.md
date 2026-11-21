@@ -72,7 +72,8 @@ droidkit doctor --fix   # diagnose and repair an existing setup
 | `setup` | Install and configure the full toolchain. |
 | `doctor [--fix]` | Diagnose (and repair) the toolchain. |
 | `start [name]` / `stop [--all]` / `list` | Run and manage emulators. |
-| `avd create \| delete \| devices` | Create and delete emulators. |
+| `avd create [device] [-n name]` | Create an emulator (`droidkit avd create pixel_tablet`). |
+| `avd delete \| devices` | Delete emulators, list device profiles. |
 | `images [--api N]` | System images that run on this computer. |
 | `sdk list \| install \| uninstall \| update` | Manage SDK packages. |
 | `jdk install \| list` | Manage JDKs. |

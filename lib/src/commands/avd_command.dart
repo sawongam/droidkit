@@ -92,7 +92,9 @@ class _AvdCreateCommand extends DroidkitCommand {
       ..addOption(
         'device',
         abbr: 'd',
-        help: 'Device profile id (see `droidkit avd devices`).',
+        help:
+            'Device profile id (see `droidkit avd devices`). '
+            'Can also be given as the first argument.',
       )
       ..addFlag(
         'force',
@@ -109,8 +111,27 @@ class _AvdCreateCommand extends DroidkitCommand {
       'Create an emulator (installs the emulator and system image if needed).';
 
   @override
+  String get invocation => 'droidkit avd create [<device>] [options]';
+
+  @override
+  String get usageFooter => '''
+
+Examples:
+  droidkit avd create                         default Pixel phone
+  droidkit avd create pixel_tablet            pick a device profile
+  droidkit avd create pixel_tablet -n Tab     ...and name the emulator
+  droidkit avd create --api 34 --image google_apis''';
+
+  @override
   Future<int> run() async {
-    maxArgs(0);
+    maxArgs(1);
+    final deviceFlag = argResults!['device'] as String?;
+    if (rest.isNotEmpty && deviceFlag != null && deviceFlag != rest.first) {
+      usageException(
+        'Device given twice ("${rest.first}" and --device $deviceFlag).',
+      );
+    }
+    final device = rest.isNotEmpty ? rest.first : deviceFlag;
     final ctx = await context();
     final apiArg = argResults!['api'] as String?;
     final api = apiArg == null ? null : int.tryParse(apiArg);
@@ -125,7 +146,7 @@ class _AvdCreateCommand extends DroidkitCommand {
       sdk: sdk,
       api: api,
       tag: argResults!['image'] as String,
-      device: argResults!['device'] as String?,
+      device: device,
       name: argResults!['name'] as String?,
       force: argResults!['force'] as bool,
     );
