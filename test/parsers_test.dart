@@ -36,6 +36,27 @@ id: 30 or "pixel_8"
     expect(AvdService.defaultDevice([]), isNull);
   });
 
+  test('device ids match regardless of case', () {
+    const devices = [
+      DeviceProfile('pixel_tablet', 'Pixel Tablet', 'Google'),
+      DeviceProfile('Galaxy Nexus', 'Galaxy Nexus', 'Google'),
+    ];
+    expect(AvdService.matchDevice(devices, 'pixel_tablet')?.id, 'pixel_tablet');
+    expect(AvdService.matchDevice(devices, 'Pixel_Tablet')?.id, 'pixel_tablet');
+    expect(AvdService.matchDevice(devices, 'galaxy nexus')?.id, 'Galaxy Nexus');
+    expect(AvdService.matchDevice(devices, 'pixel_9'), isNull);
+    expect(AvdService.matchDevice([], 'pixel_tablet'), isNull);
+  });
+
+  test('an exact device id wins over a case-only match', () {
+    const devices = [
+      DeviceProfile('nexus_one', 'a', 'Google'),
+      DeviceProfile('Nexus_One', 'b', 'Google'),
+    ];
+    expect(AvdService.matchDevice(devices, 'Nexus_One')?.name, 'b');
+    expect(AvdService.matchDevice(devices, 'NEXUS_ONE')?.name, 'a');
+  });
+
   test('flutter config --list', () {
     const output = '''
 All Settings:

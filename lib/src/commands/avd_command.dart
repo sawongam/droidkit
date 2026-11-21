@@ -126,7 +126,9 @@ Examples:
   Future<int> run() async {
     maxArgs(1);
     final deviceFlag = argResults!['device'] as String?;
-    if (rest.isNotEmpty && deviceFlag != null && deviceFlag != rest.first) {
+    if (rest.isNotEmpty &&
+        deviceFlag != null &&
+        deviceFlag.toLowerCase() != rest.first.toLowerCase()) {
       usageException(
         'Device given twice ("${rest.first}" and --device $deviceFlag).',
       );

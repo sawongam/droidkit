@@ -36,6 +36,32 @@ void main() {
     expect(await runner.run(['start', '--gpu', 'banana']), ExitCode.usage.code);
   });
 
+  group('avd create', () {
+    test('takes at most one device argument', () async {
+      expect(
+        await runner.run(['avd', 'create', 'pixel_tablet', 'extra']),
+        ExitCode.usage.code,
+      );
+      verify(() => logger.err('Too many arguments.')).called(1);
+    });
+
+    test('rejects two different devices', () async {
+      expect(
+        await runner.run(['avd', 'create', 'pixel_tablet', '-d', 'pixel_9']),
+        ExitCode.usage.code,
+      );
+      verify(
+        () => logger.err(any(that: contains('Device given twice'))),
+      ).called(1);
+    });
+
+    test('shows the device argument and examples in help', () async {
+      final usage = runner.commands['avd']!.subcommands['create']!.usage;
+      expect(usage, contains('droidkit avd create [<device>] [options]'));
+      expect(usage, contains('droidkit avd create pixel_tablet -n Tab'));
+    });
+  });
+
   test('every command has a description', () {
     for (final command in runner.commands.values) {
       expect(command.description, isNotEmpty, reason: command.name);
