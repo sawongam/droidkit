@@ -126,6 +126,12 @@ class AvdService {
     return phones.lastOrNull?.id;
   }
 
+  /// Finds the profile for [id], ignoring case (`Pixel_Tablet` matches
+  /// `pixel_tablet`). An exact match wins.
+  static DeviceProfile? matchDevice(List<DeviceProfile> devices, String id) =>
+      devices.where((d) => d.id == id).firstOrNull ??
+      devices.where((d) => d.id.toLowerCase() == id.toLowerCase()).firstOrNull;
+
   /// Creates an AVD, installing the emulator and system image if needed.
   /// Returns the AVD name.
   Future<String> create({
@@ -145,6 +151,22 @@ class AvdService {
     }
     final installer = Installer(ctx);
     final targetApi = api ?? await installer.flutterCompileSdk();
+
+    // Check the device before downloading a multi-GB system image.
+    final tools = await ctx.tools(sdk);
+    final devices = await tools.listDevices();
+    final matched = device == null ? null : matchDevice(devices, device);
+    if (device != null && devices.isNotEmpty && matched == null) {
+      throw DroidkitException(
+        'Unknown device profile "$device".',
+        hint:
+            'Run `droidkit avd devices` to list profiles. '
+            'To name the emulator, use `-n $device`.',
+        exitCode: ExitCode.usage,
+      );
+    }
+    final deviceId = matched?.id ?? device ?? defaultDevice(devices);
+    final deviceName = devices.where((d) => d.id == deviceId).firstOrNull?.name;
 
     final progress = Task(
       _log,
@@ -174,7 +196,6 @@ class AvdService {
     }
     progress.complete('Using ${image.path}');
 
-    final tools = await ctx.tools(sdk);
     final needed = [
       if (host.supportsPlatformTools) 'platform-tools',
       'emulator',
@@ -189,19 +210,6 @@ class AvdService {
     }
     await installer.acceptLicenses(tools);
     await installer.installPackages(tools, needed);
-
-    final devices = await tools.listDevices();
-    if (device != null &&
-        devices.isNotEmpty &&
-        !devices.any((d) => d.id == device)) {
-      throw DroidkitException(
-        'Unknown device profile "$device".',
-        hint: 'Run `droidkit avd devices` to list profiles.',
-        exitCode: ExitCode.usage,
-      );
-    }
-    final deviceId = device ?? defaultDevice(devices);
-    final deviceName = devices.where((d) => d.id == deviceId).firstOrNull?.name;
 
     final existing = await tools.listAvds();
     var avdName = sanitizeAvdName(
